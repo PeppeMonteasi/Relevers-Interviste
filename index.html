@@ -332,15 +332,12 @@ function sendToSheet(record) {
     const url = record.tipo === 'Locale' ? SHEET_URL_LOCALI : SHEET_URL_UTENTI;
     const payload = { data: [record] };
 
-
-    const params = new URLSearchParams();
-    params.append('data', JSON.stringify(payload)); 
-
-    // 2. La fetch "pulita" e blindata
+    
     fetch(url, {
       method: 'POST',
-      mode: 'cors',
-      body: params
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      mode: 'no-cors',
+      body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(res => {

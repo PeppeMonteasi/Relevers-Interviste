@@ -326,7 +326,66 @@ function setSyncStatus(s) {
   el.textContent = labels[s] || s;
 }
 
-function sendToSheet(record) {
+
+
+async function sendToSheet(dati) {
+
+    API_URL = dati.tipo === 'Locale' ? SHEET_URL_LOCALI : SHEET_URL_UTENTI;
+
+    console.log("Invio dati:", dati);
+
+    try {
+
+        const params = new URLSearchParams();
+
+        params.append(
+            "data",
+            JSON.stringify(dati)
+        );
+
+
+        const response = await fetch(API_URL, {
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+
+            body: params.toString()
+        });
+
+
+        console.log("Status HTTP:", response.status);
+
+
+        const text = await response.text();
+
+        console.log("Risposta server:", text);
+
+
+        if (!response.ok) {
+            throw new Error(
+                "Errore HTTP " + response.status
+            );
+        }
+
+
+        return JSON.parse(text);
+
+
+    } catch(error) {
+
+        console.error(
+            "Errore chiamata API:",
+            error
+        );
+
+        throw error;
+    }
+}
+
+
+function sendToSheetOld(record) {
   return new Promise((resolve) => {
     setSyncStatus('syncing');
     const url = record.tipo === 'Locale' ? SHEET_URL_LOCALI : SHEET_URL_UTENTI;
@@ -337,24 +396,28 @@ function sendToSheet(record) {
     params.append('data', JSON.stringify(payload)); 
 
     // 2. La fetch definitiva
-
-
-
-    const formData = new FormData();
-    // Aggiungiamo i dati come coppie chiave-valore
-    formData.append('data', JSON.stringify(payload));
-
-    fetch('https://script.google.com/macros/s/AKfycbyHIVJeP07TqdYFjPaizNTBf2-Q9rBt-1sP6OJ-dUnukSAYU5vNwGANIQVkEp2qCuoE/exec', {
-        method: 'POST',
-        // NON mettere header
-        // NON mettere mode
-        body: formData 
+    
+    fetch(url, {
+      method: "POST",
+      body: "data=" + encodeURIComponent(JSON.stringify(payload))
     })
-    .then(r => r.text())
-    .then(d => console.log("Risposta:", d))
-    .catch(e => console.error("Errore:", e));
-
-  
+    .then(r => r.json())
+    .then(res => {
+      if (res && (res.created || res[0])) {
+        setSyncStatus('ok');
+        setTimeout(() => setSyncStatus('idle'), 3000);
+        resolve(true);
+      } else {
+        setSyncStatus('err');
+        setTimeout(() => setSyncStatus('idle'), 3000);
+        resolve(false);
+      }
+    })
+    .catch(() => {
+      setSyncStatus('err');
+      setTimeout(() => setSyncStatus('idle'), 3000);
+      resolve(false);
+    });
   });
 }
 

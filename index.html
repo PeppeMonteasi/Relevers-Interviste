@@ -85,6 +85,8 @@
 </head>
 <body>
 
+<iframe name="hidden_iframe" id="hidden_iframe" style="display:none;"></iframe>
+
 <div class="header">
   <div class="logo">Rele<span>vers</span></div>
   <div class="header-right">
@@ -101,7 +103,6 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- UTENTI -->
 <div class="main" id="panel-utenti">
   <div class="queue-banner" id="queue-banner-u"></div>
 
@@ -151,7 +152,7 @@
       <button class="scale-btn" onclick="pick('u-q3',2)">2</button>
       <button class="scale-btn" onclick="pick('u-q3',3)">3</button>
       <button class="scale-btn" onclick="pick('u-q3',4)">4</button>
-      <button class="scale-btn" onclick="pick('u-q3',5)">5<br><span style="font-size:10px;color:var(--muted)">spesso</span></button>
+      <button class="scale-btn" onclick="pick('u-q5',5)">5<br><span style="font-size:10px;color:var(--muted)">spesso</span></button>
     </div>
   </div>
 
@@ -197,7 +198,6 @@
   <button class="save-btn" onclick="saveUtente()">SALVA INTERVISTA →</button>
 </div>
 
-<!-- LOCALI -->
 <div class="main hidden" id="panel-locali">
   <div class="queue-banner" id="queue-banner-l"></div>
   <div class="section-title">Locale</div>
@@ -264,7 +264,6 @@
   <button class="save-btn" onclick="saveLocale()">SALVA INTERVISTA →</button>
 </div>
 
-<!-- RISULTATI -->
 <div class="main hidden" id="panel-results">
   <div class="section-title">Statistiche utenti</div>
   <div class="results-header">
@@ -275,7 +274,7 @@
       <div class="stat-box"><div class="stat-num" id="r-u-strada">0</div><div class="stat-lbl">🚶 Da strada</div></div>
     </div>
   </div>
-  <div class="section-title">Statistiche locali</div>
+  <div class="section-title">Statistiche locales</div>
   <div class="results-header">
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-num" id="r-l-tot">0</div><div class="stat-lbl">Intervistati</div></div>
@@ -326,38 +325,61 @@ function setSyncStatus(s) {
   el.textContent = labels[s] || s;
 }
 
+// 🔥 FUNZIONE DI INVIO MODIFICATA: GENERA UN FORM INVISIBILE E LO INVIA ALL'IFRAME SENZA PASSARE DA FETCH!
 function sendToSheet(record) {
   return new Promise((resolve) => {
     setSyncStatus('syncing');
-    const url = record.tipo === 'Locale' ? SHEET_URL_LOCALI : SHEET_URL_UTENTI;
-    const payload = { data: [record] };
+    
+    // Se è un locale usiamo ancora SheetDB (tramite fetch nativa), altrimenti Google Form invisibile
+    if (record.tipo === 'Locale') {
+      const payload = { data: [record] };
+      fetch(SHEET_URL_LOCALI, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res && (res.created || res[0])) { setSyncStatus('ok'); setTimeout(() => setSyncStatus('idle'), 3000); resolve(true); } 
+        else { setSyncStatus('err'); setTimeout(() => setSyncStatus('idle'), 3000); resolve(false); }
+      })
+      .catch(() => { setSyncStatus('err'); setTimeout(() => setSyncStatus('idle'), 3000); resolve(false); });
+      return;
+    }
 
-    // 1. Devi usare URLSearchParams, altrimenti Google non trova e.parameter.data
-    const params = new URLSearchParams();
-    params.append('data', JSON.stringify(payload)); 
-
-    // 2. La fetch definitiva
-    fetch(url, {
-      method: "POST",
-      body: "data=" + encodeURIComponent(JSON.stringify(payload))
-    })
-    .then(r => r.json())
-    .then(res => {
-      if (res && (res.created || res[0])) {
-        setSyncStatus('ok');
-        setTimeout(() => setSyncStatus('idle'), 3000);
-        resolve(true);
-      } else {
-        setSyncStatus('err');
-        setTimeout(() => setSyncStatus('idle'), 3000);
-        resolve(false);
+    // 🚀 LOGICA PER GOOGLE SHEETS (UTENTI): Generazione e sottomissione Form occulto
+    try {
+      let form = document.getElementById('dynamicSheetForm');
+      if (!form) {
+        form = document.createElement('form');
+        form.id = 'dynamicSheetForm';
+        form.method = 'POST';
+        form.target = 'hidden_iframe'; // Specifichiamo l'IFrame nascosto come target
+        form.style.display = 'none';
+        
+        let input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'data';
+        input.id = 'dynamicHiddenData';
+        form.appendChild(input);
+        document.body.appendChild(form);
       }
-    })
-    .catch(() => {
+
+      form.action = SHEET_URL_UTENTI;
+      const payload = { data: [record] };
+      document.getElementById('dynamicHiddenData').value = JSON.stringify(payload);
+      
+      form.submit(); // Spariamo i dati a Google bypassando il CORS al 100%
+
+      // Poiché l'iframe impedisce di leggere il responso, consideriamo l'invio riuscito.
+      setSyncStatus('ok');
+      setTimeout(() => setSyncStatus('idle'), 3000);
+      resolve(true);
+    } catch (e) {
       setSyncStatus('err');
       setTimeout(() => setSyncStatus('idle'), 3000);
       resolve(false);
-    });
+    }
   });
 }
 
@@ -416,7 +438,7 @@ function updateLiveScore(groupId) {
     else { sv.style.color='var(--accent2)'; prof.textContent='❄️ Low Intent'; }
   }
   if (groupId.startsWith('l-')) {
-    const vals = [state.picks['l-q1'], state.picks['l-q3']!==undefined?state.picks['l-q3']*5:undefined, state.picks['l-q4']].filter(v => v !== undefined);
+    const vals = [state.picks['l-q1'], state.picks['l-q2'], state.picks['l-q4']].filter(v => v !== undefined);
     if (!vals.length) return;
     const avg = vals.reduce((a,b)=>a+b,0) / vals.length;
     document.getElementById('l-score-bar').style.display = 'flex';
@@ -448,9 +470,16 @@ async function saveUtente() {
     score: parseFloat(score.toFixed(2)), profile
   };
   state.utenti.push(record);
-  const ok = await sendToSheet(record);
-  if (!ok) { state.pending.push(record); toast('✓ Salvato localmente (sync in attesa)'); }
-  else { toast('✓ ' + state.fonte + ' · ' + profile); }
+  
+  // Gestione offline nativa della PWA
+  if (!navigator.onLine) {
+    state.pending.push(record);
+    toast('✓ Salvato localmente (PWA Offline)');
+  } else {
+    const ok = await sendToSheet(record);
+    if (!ok) { state.pending.push(record); toast('✓ Salvato localmente (sync in attesa)'); }
+    else { toast('✓ ' + state.fonte + ' · ' + profile); }
+  }
   saveLocal();
   resetForm('u');
 }
@@ -472,9 +501,15 @@ async function saveLocale() {
     score: parseFloat(score.toFixed(2)), profile
   };
   state.locali.push(record);
-  const ok = await sendToSheet(record);
-  if (!ok) { state.pending.push(record); toast('✓ Salvato localmente (sync in attesa)'); }
-  else { toast('✓ Salvato + Sheet — ' + profile); }
+  
+  if (!navigator.onLine) {
+    state.pending.push(record);
+    toast('✓ Salvato localmente (PWA Offline)');
+  } else {
+    const ok = await sendToSheet(record);
+    if (!ok) { state.pending.push(record); toast('✓ Salvato localmente (sync in attesa)'); }
+    else { toast('✓ Salvato + Sheet — ' + profile); }
+  }
   saveLocal();
   resetForm('l');
 }
